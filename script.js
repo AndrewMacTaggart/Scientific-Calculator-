@@ -51,10 +51,10 @@ class Calendar {
 
     populateYearSelect() {
         const yearSelect = document.getElementById('yearSelect');
-        const currentYear = new Date().getFullYear();
         const years = [];
         
-        for (let i = currentYear - 10; i <= currentYear + 10; i++) {
+        // Set year range to 2025-2035
+        for (let i = 2025; i <= 2035; i++) {
             years.push(i);
         }
         
@@ -133,6 +133,11 @@ class Calendar {
                 dayElement.classList.add('has-tasks');
             }
             
+            // Check if it has notes
+            if (window.notepadManager && window.notepadManager.hasNoteForDate(date)) {
+                dayElement.classList.add('has-notes');
+            }
+            
             const dayNumber = document.createElement('div');
             dayNumber.className = 'calendar-day-number';
             dayNumber.textContent = day;
@@ -166,6 +171,11 @@ class Calendar {
         
         // Filter tasks by selected date
         this.taskTracker.filterByDate(this.selectedDate);
+        
+        // Update notepad for selected date
+        if (window.notepadManager) {
+            window.notepadManager.loadNoteForDate(this.selectedDate);
+        }
         
         // Re-render calendar to show selection
         this.renderCalendar();
@@ -251,8 +261,10 @@ class TaskTracker {
     addTask() {
         const taskInput = document.getElementById('taskInput');
         const taskDateInput = document.getElementById('taskDate');
+        const taskTimeInput = document.getElementById('taskTime');
         const text = taskInput.value.trim();
         const dateValue = taskDateInput.value;
+        const timeValue = taskTimeInput.value;
 
         if (text === '') {
             return;
@@ -277,11 +289,13 @@ class TaskTracker {
             text: text,
             completed: false,
             date: taskDateStr,
+            time: timeValue || null, // Store time if provided
             createdAt: new Date().toISOString()
         };
 
         this.tasks.push(task);
         taskInput.value = '';
+        taskTimeInput.value = ''; // Clear time input
         
         this.saveTasks();
         this.renderTasks();
@@ -451,10 +465,38 @@ class TaskTracker {
             emptyState.classList.add('hidden');
         }
 
+        // Sort tasks by date and time
+        const sortedTasks = this.sortTasksByDateTime(filteredTasks);
+
         // Render each task
-        filteredTasks.forEach(task => {
+        sortedTasks.forEach(task => {
             const taskItem = this.createTaskElement(task);
             taskList.appendChild(taskItem);
+        });
+    }
+
+    sortTasksByDateTime(tasks) {
+        return [...tasks].sort((a, b) => {
+            // Holidays come first
+            if (a.isHoliday && !b.isHoliday) return -1;
+            if (!a.isHoliday && b.isHoliday) return 1;
+            
+            // Sort by date first
+            if (a.date !== b.date) {
+                return (a.date || '').localeCompare(b.date || '');
+            }
+            
+            // If same date, sort by time
+            if (a.time && b.time) {
+                return a.time.localeCompare(b.time);
+            }
+            
+            // Tasks with time come before tasks without time on the same date
+            if (a.time && !b.time) return -1;
+            if (!a.time && b.time) return 1;
+            
+            // If same date and no time, maintain original order
+            return 0;
         });
     }
 
@@ -464,8 +506,10 @@ class TaskTracker {
         li.className = `task-item ${!task.isHoliday && task.completed ? 'completed' : ''}`;
         li.dataset.id = task.id;
         
-        // Add holiday indicator or date badge
+        // Add holiday indicator or date/time badges
         let dateBadge = null;
+        let timeBadge = null;
+        
         if (task.isHoliday) {
             dateBadge = document.createElement('div');
             dateBadge.className = 'task-date-badge holiday-badge';
@@ -491,6 +535,17 @@ class TaskTracker {
                 dateBadge.textContent = taskDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
             } else {
                 dateBadge.textContent = taskDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+            }
+            
+            // Add time badge if time is set
+            if (task.time) {
+                timeBadge = document.createElement('div');
+                timeBadge.className = 'task-time-badge';
+                // Format time to 12-hour format
+                const [hours, minutes] = task.time.split(':');
+                const hour12 = parseInt(hours) % 12 || 12;
+                const ampm = parseInt(hours) >= 12 ? 'PM' : 'AM';
+                timeBadge.textContent = `${hour12}:${minutes} ${ampm}`;
             }
         }
 
@@ -584,9 +639,20 @@ class TaskTracker {
             li.appendChild(checkbox);
         }
         li.appendChild(textContainer);
+        
+        // Add badges container
+        const badgesContainer = document.createElement('div');
+        badgesContainer.className = 'task-badges';
         if (dateBadge) {
-            li.appendChild(dateBadge);
+            badgesContainer.appendChild(dateBadge);
         }
+        if (timeBadge) {
+            badgesContainer.appendChild(timeBadge);
+        }
+        if (badgesContainer.children.length > 0) {
+            li.appendChild(badgesContainer);
+        }
+        
         li.appendChild(actions);
 
         return li;
@@ -654,9 +720,14 @@ class TaskTracker {
     }
 
     initializeHolidays() {
-        const currentYear = new Date().getFullYear();
-        const nextYear = currentYear + 1;
-        const holidays = this.getHolidaysForYear(currentYear).concat(this.getHolidaysForYear(nextYear));
+        // Create holidays for years 2025-2035
+        const startYear = 2025;
+        const endYear = 2035;
+        let allHolidays = [];
+        
+        for (let year = startYear; year <= endYear; year++) {
+            allHolidays = allHolidays.concat(this.getHolidaysForYear(year));
+        }
         
         // Get existing holiday IDs to avoid duplicates
         const existingHolidayIds = new Set(
@@ -664,7 +735,7 @@ class TaskTracker {
         );
         
         // Add holidays that don't already exist
-        holidays.forEach(holiday => {
+        allHolidays.forEach(holiday => {
             if (!existingHolidayIds.has(holiday.id)) {
                 this.tasks.push(holiday);
             }
@@ -852,15 +923,19 @@ class TaskTracker {
         let day = 1;
         
         // Rough approximation: Rosh Hashanah is usually between Sept 5-Oct 5
-        // Using a lookup table for common years (simplified)
+        // Using a lookup table for years 2025-2035
         const roshHashanahDates = {
-            2024: '2024-10-03',
             2025: '2025-09-23',
             2026: '2026-09-12',
             2027: '2027-10-02',
             2028: '2028-09-21',
             2029: '2029-09-10',
-            2030: '2030-09-28'
+            2030: '2030-09-28',
+            2031: '2031-09-17',
+            2032: '2032-10-06',
+            2033: '2033-09-25',
+            2034: '2034-09-14',
+            2035: '2035-10-04'
         };
         
         if (roshHashanahDates[year]) {
@@ -881,15 +956,19 @@ class TaskTracker {
     // Calculate Hanukkah (First Day) - simplified calculation
     getHanukkah(year) {
         // Hanukkah typically falls in late November to late December
-        // Using a lookup table for common years
+        // Using a lookup table for years 2025-2035
         const hanukkahDates = {
-            2024: '2024-12-25',
             2025: '2025-12-14',
             2026: '2026-12-04',
             2027: '2027-12-24',
             2028: '2028-12-12',
             2029: '2029-12-01',
-            2030: '2030-12-20'
+            2030: '2030-12-20',
+            2031: '2031-12-09',
+            2032: '2032-11-28',
+            2033: '2033-12-17',
+            2034: '2034-12-06',
+            2035: '2035-12-26'
         };
         
         if (hanukkahDates[year]) {
@@ -903,15 +982,19 @@ class TaskTracker {
     // Calculate Diwali (Hindu Festival of Lights) - simplified calculation
     getDiwali(year) {
         // Diwali typically falls in October or November
-        // Using a lookup table for common years
+        // Using a lookup table for years 2025-2035
         const diwaliDates = {
-            2024: '2024-11-01',
             2025: '2025-10-20',
             2026: '2026-11-08',
             2027: '2027-10-29',
             2028: '2028-10-18',
             2029: '2029-11-05',
-            2030: '2030-10-26'
+            2030: '2030-10-26',
+            2031: '2031-11-14',
+            2032: '2032-11-02',
+            2033: '2033-10-22',
+            2034: '2034-11-11',
+            2035: '2035-10-31'
         };
         
         if (diwaliDates[year]) {
@@ -925,15 +1008,19 @@ class TaskTracker {
     // Calculate Chinese New Year - simplified calculation
     getChineseNewYear(year) {
         // Chinese New Year typically falls between January 21 and February 20
-        // Using a lookup table for common years
+        // Using a lookup table for years 2025-2035
         const chineseNewYearDates = {
-            2024: '2024-02-10',
             2025: '2025-01-29',
             2026: '2026-02-17',
             2027: '2027-02-06',
             2028: '2028-01-26',
             2029: '2029-02-13',
-            2030: '2030-02-03'
+            2030: '2030-02-03',
+            2031: '2031-01-23',
+            2032: '2032-02-11',
+            2033: '2033-01-31',
+            2034: '2034-02-19',
+            2035: '2035-02-08'
         };
         
         if (chineseNewYearDates[year]) {
@@ -1157,9 +1244,362 @@ class SettingsManager {
     }
 }
 
+// Notepad Manager
+class NotepadManager {
+    constructor() {
+        this.notes = {};
+        this.currentDate = null;
+        this.init();
+    }
+
+    init() {
+        this.loadAllNotes();
+        this.setupEventListeners();
+        
+        // Load today's note by default
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        this.loadNoteForDate(today);
+    }
+
+    setupEventListeners() {
+        const textarea = document.getElementById('notepadTextarea');
+        const clearBtn = document.getElementById('clearNote');
+
+        // Auto-save on input (with debounce)
+        let saveTimeout;
+        textarea.addEventListener('input', () => {
+            clearTimeout(saveTimeout);
+            saveTimeout = setTimeout(() => {
+                this.saveCurrentNote();
+            }, 500);
+        });
+
+        // Clear note button
+        clearBtn.addEventListener('click', () => {
+            if (this.currentDate && confirm('Are you sure you want to clear this note?')) {
+                this.clearCurrentNote();
+            }
+        });
+    }
+
+    getDateString(date) {
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    }
+
+    formatDateDisplay(date) {
+        const options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
+        return date.toLocaleDateString('en-US', options);
+    }
+
+    loadNoteForDate(date) {
+        this.currentDate = new Date(date);
+        this.currentDate.setHours(0, 0, 0, 0);
+        
+        const dateStr = this.getDateString(this.currentDate);
+        const textarea = document.getElementById('notepadTextarea');
+        const dateDisplay = document.getElementById('notepadDateDisplay');
+        
+        // Update date display
+        dateDisplay.textContent = this.formatDateDisplay(this.currentDate);
+        
+        // Load note for this date
+        const note = this.notes[dateStr] || '';
+        textarea.value = note;
+        
+        // Show saved indicator briefly
+        this.showSavedIndicator();
+    }
+
+    saveCurrentNote() {
+        if (!this.currentDate) return;
+        
+        const dateStr = this.getDateString(this.currentDate);
+        const textarea = document.getElementById('notepadTextarea');
+        
+        this.notes[dateStr] = textarea.value;
+        this.saveAllNotes();
+        this.showSavedIndicator();
+        
+        // Refresh calendar to update note indicators
+        if (window.taskTracker && window.taskTracker.calendar) {
+            window.taskTracker.calendar.refresh();
+        }
+    }
+
+    clearCurrentNote() {
+        if (!this.currentDate) return;
+        
+        const dateStr = this.getDateString(this.currentDate);
+        const textarea = document.getElementById('notepadTextarea');
+        
+        this.notes[dateStr] = '';
+        textarea.value = '';
+        this.saveAllNotes();
+        
+        // Refresh calendar to update note indicators
+        if (window.taskTracker && window.taskTracker.calendar) {
+            window.taskTracker.calendar.refresh();
+        }
+    }
+
+    showSavedIndicator() {
+        const indicator = document.getElementById('noteSavedIndicator');
+        indicator.classList.add('show');
+        setTimeout(() => {
+            indicator.classList.remove('show');
+        }, 2000);
+    }
+
+    saveAllNotes() {
+        try {
+            localStorage.setItem('notepadNotes', JSON.stringify(this.notes));
+        } catch (error) {
+            console.error('Error saving notes:', error);
+        }
+    }
+
+    loadAllNotes() {
+        try {
+            const saved = localStorage.getItem('notepadNotes');
+            if (saved) {
+                this.notes = JSON.parse(saved);
+            }
+        } catch (error) {
+            console.error('Error loading notes:', error);
+            this.notes = {};
+        }
+    }
+
+    getNoteForDate(date) {
+        const dateStr = this.getDateString(date);
+        return this.notes[dateStr] || '';
+    }
+
+    hasNoteForDate(date) {
+        const dateStr = this.getDateString(date);
+        return this.notes[dateStr] && this.notes[dateStr].trim().length > 0;
+    }
+}
+
+// Clock Manager
+class ClockManager {
+    constructor() {
+        this.currentTimezone = 'local';
+        this.clockInterval = null;
+        this.stopwatchInterval = null;
+        this.stopwatchTime = 0;
+        this.stopwatchRunning = false;
+        this.lapCount = 0;
+        this.init();
+    }
+
+    init() {
+        this.setupEventListeners();
+        this.startClock();
+    }
+
+    setupEventListeners() {
+        // Tab switching
+        const tabs = document.querySelectorAll('.clock-tab');
+        tabs.forEach(tab => {
+            tab.addEventListener('click', (e) => {
+                this.switchTab(e.target.dataset.tab);
+            });
+        });
+
+        // Timezone selector
+        const timezoneSelect = document.getElementById('timezoneSelect');
+        timezoneSelect.addEventListener('change', (e) => {
+            this.currentTimezone = e.target.value;
+            this.updateClock();
+        });
+
+        // Stopwatch controls
+        document.getElementById('stopwatchStart').addEventListener('click', () => this.startStopwatch());
+        document.getElementById('stopwatchPause').addEventListener('click', () => this.pauseStopwatch());
+        document.getElementById('stopwatchLap').addEventListener('click', () => this.addLap());
+        document.getElementById('stopwatchReset').addEventListener('click', () => this.resetStopwatch());
+    }
+
+    switchTab(tab) {
+        // Update tab buttons
+        document.querySelectorAll('.clock-tab').forEach(t => {
+            t.classList.remove('active');
+            if (t.dataset.tab === tab) {
+                t.classList.add('active');
+            }
+        });
+
+        // Update tab content
+        document.querySelectorAll('.clock-tab-content').forEach(content => {
+            content.classList.remove('active');
+        });
+
+        if (tab === 'clock') {
+            document.getElementById('clockTab').classList.add('active');
+        } else {
+            document.getElementById('stopwatchTab').classList.add('active');
+        }
+    }
+
+    startClock() {
+        this.updateClock();
+        this.clockInterval = setInterval(() => {
+            this.updateClock();
+        }, 1000);
+    }
+
+    updateClock() {
+        const clockTime = document.getElementById('clockTime');
+        const clockDate = document.getElementById('clockDate');
+        const clockTimezone = document.getElementById('clockTimezone');
+
+        try {
+            let timeFormatter, dateFormatter, tzName;
+
+            if (this.currentTimezone === 'local') {
+                const now = new Date();
+                const hours = String(now.getHours()).padStart(2, '0');
+                const minutes = String(now.getMinutes()).padStart(2, '0');
+                const seconds = String(now.getSeconds()).padStart(2, '0');
+                clockTime.textContent = `${hours}:${minutes}:${seconds}`;
+
+                const options = { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' };
+                clockDate.textContent = now.toLocaleDateString('en-US', options);
+                clockTimezone.textContent = 'Local Time';
+            } else {
+                // Format time
+                timeFormatter = new Intl.DateTimeFormat('en-US', {
+                    timeZone: this.currentTimezone,
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit',
+                    hour12: false
+                });
+
+                // Format date
+                dateFormatter = new Intl.DateTimeFormat('en-US', {
+                    timeZone: this.currentTimezone,
+                    weekday: 'long',
+                    year: 'numeric',
+                    month: 'long',
+                    day: 'numeric'
+                });
+
+                const now = new Date();
+                const timeStr = timeFormatter.format(now);
+                const dateStr = dateFormatter.format(now);
+
+                clockTime.textContent = timeStr;
+                clockDate.textContent = dateStr;
+
+                // Get timezone name from select option
+                const select = document.getElementById('timezoneSelect');
+                const selectedOption = select.options[select.selectedIndex];
+                tzName = selectedOption.text.split('(')[0].trim();
+                clockTimezone.textContent = tzName;
+            }
+        } catch (error) {
+            console.error('Error updating clock:', error);
+            // Fallback to local time
+            const now = new Date();
+            const hours = String(now.getHours()).padStart(2, '0');
+            const minutes = String(now.getMinutes()).padStart(2, '0');
+            const seconds = String(now.getSeconds()).padStart(2, '0');
+            clockTime.textContent = `${hours}:${minutes}:${seconds}`;
+            clockDate.textContent = now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
+            clockTimezone.textContent = 'Local Time';
+        }
+    }
+
+    startStopwatch() {
+        if (!this.stopwatchRunning) {
+            this.stopwatchRunning = true;
+            const startTime = Date.now() - this.stopwatchTime;
+            
+            this.stopwatchInterval = setInterval(() => {
+                this.stopwatchTime = Date.now() - startTime;
+                this.updateStopwatchDisplay();
+            }, 10);
+
+            document.getElementById('stopwatchStart').disabled = true;
+            document.getElementById('stopwatchPause').disabled = false;
+            document.getElementById('stopwatchLap').disabled = false;
+        }
+    }
+
+    pauseStopwatch() {
+        if (this.stopwatchRunning) {
+            this.stopwatchRunning = false;
+            clearInterval(this.stopwatchInterval);
+            
+            document.getElementById('stopwatchStart').disabled = false;
+            document.getElementById('stopwatchPause').disabled = true;
+            document.getElementById('stopwatchLap').disabled = true;
+        }
+    }
+
+    resetStopwatch() {
+        this.pauseStopwatch();
+        this.stopwatchTime = 0;
+        this.lapCount = 0;
+        this.updateStopwatchDisplay();
+        
+        // Clear laps
+        const lapsContainer = document.getElementById('stopwatchLaps');
+        lapsContainer.innerHTML = '';
+        
+        document.getElementById('stopwatchStart').disabled = false;
+        document.getElementById('stopwatchLap').disabled = true;
+    }
+
+    updateStopwatchDisplay() {
+        const display = document.getElementById('stopwatchDisplay');
+        const totalSeconds = Math.floor(this.stopwatchTime / 1000);
+        const hours = Math.floor(totalSeconds / 3600);
+        const minutes = Math.floor((totalSeconds % 3600) / 60);
+        const seconds = totalSeconds % 60;
+        const milliseconds = Math.floor((this.stopwatchTime % 1000) / 10);
+
+        display.textContent = 
+            `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}.${String(milliseconds).padStart(2, '0')}`;
+    }
+
+    addLap() {
+        this.lapCount++;
+        const lapsContainer = document.getElementById('stopwatchLaps');
+        const lapItem = document.createElement('div');
+        lapItem.className = 'stopwatch-lap-item';
+        
+        const lapTime = this.formatLapTime(this.stopwatchTime);
+        lapItem.innerHTML = `
+            <span class="stopwatch-lap-number">Lap ${this.lapCount}</span>
+            <span class="stopwatch-lap-time">${lapTime}</span>
+        `;
+        
+        lapsContainer.insertBefore(lapItem, lapsContainer.firstChild);
+    }
+
+    formatLapTime(time) {
+        const totalSeconds = Math.floor(time / 1000);
+        const hours = Math.floor(totalSeconds / 3600);
+        const minutes = Math.floor((totalSeconds % 3600) / 60);
+        const seconds = totalSeconds % 60;
+        const milliseconds = Math.floor((time % 1000) / 10);
+
+        return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}.${String(milliseconds).padStart(2, '0')}`;
+    }
+}
+
 // Initialize the task tracker when the DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
-    new TaskTracker();
+    window.taskTracker = new TaskTracker();
     new SettingsManager();
+    window.notepadManager = new NotepadManager();
+    new ClockManager();
 });
 

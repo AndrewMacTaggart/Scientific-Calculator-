@@ -7,7 +7,8 @@
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
-    <div class="container">
+    <div class="main-wrapper">
+        <div class="container">
         <header>
             <button id="settingsBtn" class="settings-btn" title="Settings">
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -144,6 +145,12 @@
                         class="task-date-input"
                         title="Select a date for this task"
                     >
+                    <input 
+                        type="time" 
+                        id="taskTime" 
+                        class="task-time-input"
+                        title="Select a time for this task (optional)"
+                    >
                 </div>
                 <button type="submit" class="add-btn">Add Task</button>
             </form>
@@ -167,6 +174,75 @@
                 <p>No tasks yet. Add one above to get started!</p>
             </div>
         </div>
+    </div>
+
+    <div class="notepad-container">
+        <div class="notepad-header">
+            <h2>📝 Daily Notes</h2>
+            <div class="notepad-date-display" id="notepadDateDisplay">Select a date</div>
+        </div>
+        <div class="notepad-content">
+            <textarea 
+                id="notepadTextarea" 
+                class="notepad-textarea" 
+                placeholder="Select a date from the calendar to start writing notes for that day..."
+            ></textarea>
+            <div class="notepad-footer">
+                <button id="clearNote" class="clear-note-btn">Clear Note</button>
+                <span class="note-saved-indicator" id="noteSavedIndicator">Saved</span>
+            </div>
+        </div>
+    </div>
+
+    <div class="clock-container">
+        <div class="clock-header">
+            <h2>🕐 Clock & Timer</h2>
+            <div class="clock-tabs">
+                <button class="clock-tab active" data-tab="clock">Clock</button>
+                <button class="clock-tab" data-tab="stopwatch">Stopwatch</button>
+            </div>
+        </div>
+        
+        <div class="clock-content">
+            <!-- Clock Tab -->
+            <div id="clockTab" class="clock-tab-content active">
+                <div class="timezone-selector">
+                    <label for="timezoneSelect">Timezone:</label>
+                    <select id="timezoneSelect" class="timezone-select">
+                        <option value="local">Local Time</option>
+                        <option value="America/New_York">New York (EST/EDT)</option>
+                        <option value="America/Chicago">Chicago (CST/CDT)</option>
+                        <option value="America/Denver">Denver (MST/MDT)</option>
+                        <option value="America/Los_Angeles">Los Angeles (PST/PDT)</option>
+                        <option value="Europe/London">London (GMT/BST)</option>
+                        <option value="Europe/Paris">Paris (CET/CEST)</option>
+                        <option value="Asia/Tokyo">Tokyo (JST)</option>
+                        <option value="Asia/Shanghai">Shanghai (CST)</option>
+                        <option value="Asia/Dubai">Dubai (GST)</option>
+                        <option value="Australia/Sydney">Sydney (AEDT/AEST)</option>
+                        <option value="Pacific/Auckland">Auckland (NZDT/NZST)</option>
+                    </select>
+                </div>
+                <div class="digital-clock" id="digitalClock">
+                    <div class="clock-time" id="clockTime">00:00:00</div>
+                    <div class="clock-date" id="clockDate">Loading...</div>
+                    <div class="clock-timezone" id="clockTimezone">Local Time</div>
+                </div>
+            </div>
+            
+            <!-- Stopwatch Tab -->
+            <div id="stopwatchTab" class="clock-tab-content">
+                <div class="stopwatch-display" id="stopwatchDisplay">00:00:00</div>
+                <div class="stopwatch-controls">
+                    <button id="stopwatchStart" class="stopwatch-btn start-btn">Start</button>
+                    <button id="stopwatchPause" class="stopwatch-btn pause-btn" disabled>Pause</button>
+                    <button id="stopwatchLap" class="stopwatch-btn lap-btn" disabled>Lap</button>
+                    <button id="stopwatchReset" class="stopwatch-btn reset-btn">Reset</button>
+                </div>
+                <div class="stopwatch-laps" id="stopwatchLaps"></div>
+            </div>
+        </div>
+    </div>
     </div>
 
     <script src="script.js"></script>
